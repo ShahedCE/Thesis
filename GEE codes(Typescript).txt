@@ -1,0 +1,93 @@
+// Sentinel-2 Surface Reflectance Data Loading
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR")
+            .filterBounds(ee.Geometry.Point(90.3667, 23.8103)) 
+            .filterDate('2023-11-01', '2024-11-30')
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+            //needed band
+            .select(['B2','B3','B4','B8']);
+
+// Median composite
+var s2_median = s2.median();
+
+// RGB Visualization
+var rgb = s2_median.select(['B4', 'B3', 'B2']);
+Map.centerObject(s2, 11);
+Map.addLayer(rgb, {min:0, max:3000}, 'Sentinel-2 RGB (10 m)');
+
+// FCC (False Color Composite) 
+// FCC (NIR-Red-Green) = B8, B4, B3
+var fcc = s2_median.select(['B8','B4','B3']);
+
+// Map visualization for FCC (DSCC & DNCC)
+Map.addLayer(fcc.clip(DNCC), {min:0, max:3000}, 'FCC - DNCC');
+Map.addLayer(fcc.clip(DSCC), {min:0, max:3000}, 'FCC - DSCC');
+
+// AOI Border 
+var empty = ee.Image().byte();
+
+// DSCC AOI border 
+var outlineDSCC = empty.paint({
+  featureCollection: DSCC,
+  color: 1,
+  width: 2
+});
+
+// DNCC AOI border 
+var outlineDNCC = empty.paint({
+  featureCollection: DNCC,
+  color: 1,
+  width: 2
+});
+
+// show
+Map.addLayer(outlineDSCC, {palette: 'white'}, 'DSCC AOI border');
+Map.addLayer(outlineDNCC, {palette: 'white'}, 'DNCC AOI border');
+
+
+//NDWI & Stagnant Water Density Calculation 
+var ndwi = s2_median.normalizedDifference(['B3', 'B8']).rename('NDWI');
+var waterMask = ndwi.gt(0); // Binary Water Mask 
+
+//Water Density Function
+function getWaterDensity(aoi, name) {
+  // AOI total area (sq km)
+  var totalArea = aoi.area().divide(1e6);
+  
+  // Water-only area
+  var water = waterMask.clip(aoi);
+  var areaImage = water.multiply(ee.Image.pixelArea());
+  
+  var stats = areaImage.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: aoi,
+    scale: 10,
+    maxPixels: 1e13
+  });
+  var waterArea = ee.Number(stats.get('NDWI')).divide(1e6);   //Total water area
+  var density = waterArea.divide(totalArea).multiply(100);    // Density (percentage)
+  
+  // Print results
+  print(  name + ' Results:');
+  print('Total AOI Area(sq.km) of '+name+':', totalArea.format('%.2f'));
+  print('Water Area (sq.km) of '+name+':', waterArea.format('%.2f'));
+  print('Water_Density_percent :', ee.String(density.format('%.2f')).cat('%'));
+}
+
+// Function Call
+getWaterDensity(DSCC, 'DSCC');
+getWaterDensity(DNCC, 'DNCC');
+//  Visualization 
+var waterVis = {min: 0, max: 1, palette: ['white', 'blue']};
+Map.addLayer(waterMask.clip(DSCC), waterVis, 'Water Mask - DSCC');
+Map.addLayer(waterMask.clip(DNCC), waterVis, 'Water Mask - DNCC');
+
+// ---------------- AOI Area Calculation ----------------
+// DNCC
+var aoi = DNCC;
+var area_sqkm = aoi.area().divide(1000 * 1000);
+print('DNCC AOI Area (sq. km):', area_sqkm.format('%.2f'));
+
+// DSCC
+aoi = DSCC;
+area_sqkm = aoi.area().divide(1000 * 1000);
+print('DSCC AOI Area (sq. km):', area_sqkm.format('%.2f'));
