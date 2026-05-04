@@ -1,1 +1,5 @@
-# Thesis
+<<<<<<< HEAD
+(local)
+=======
+(remote)
+>>>>>>> 
